@@ -30,7 +30,7 @@ pub fn start_cli(args: Vec<String>) {
 }
 
 fn version() {
-    println!("rustygrab version 0.1.0");
+    println!("rustygrab version 0.1.1");
 }
 
 fn help() {
