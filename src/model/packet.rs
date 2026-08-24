@@ -1,4 +1,7 @@
+use crate::protocols::arp;
 use crate::protocols::ethernet;
+use crate::protocols::ethernet::EtherPayload;
+use crate::protocols::ethernet::EtherPayload::Arp;
 use crate::protocols::transport;
 use crate::protocols::tcp;
 
@@ -62,6 +65,16 @@ impl Packet {
                     flags,
                     data_length
                 );
+            }
+
+            ethernet::EtherPayload::Arp(ref arp) => {
+                let target_ip = std::net::Ipv4Addr::from(arp.target_ip);
+                let sender_ip = std::net::Ipv4Addr::from(arp.sender_ip);
+                match arp.opcode {
+                    1 => {return format!("#{} Who has {}? Tell {}",self.count, target_ip,sender_ip);},
+                    2 => {return format!("#{} {} is at {}",self.count, sender_ip, Self::format_mac(&arp.sender_mac) );},
+                    _ => return format!("#{} Unknown opcode {}",self.count, arp.opcode)
+                }
             }
             _ => {
                 let source_mac = Self::format_mac(&self.ethernet.src_mac);
