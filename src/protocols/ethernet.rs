@@ -1,5 +1,5 @@
 use crate::model::other;
-use crate::protocols::{ipv4,arp};
+use crate::protocols::{ipv4,arp,ipv6};
 
 pub struct Ethernet {
     pub dest_mac: [u8; 6],
@@ -26,6 +26,7 @@ impl Ethernet {
 pub enum EtherPayload {
     Ipv4(ipv4::Ipv4Packet),
     Arp(arp::ArpPacket),
+    Ipv6(ipv6::Ipv6Packet),
     Other(other::Other),
 }
 
@@ -34,6 +35,7 @@ impl EtherPayload {
         match ethertype {
             0x0800 => EtherPayload::Ipv4(ipv4::Ipv4Packet::parse(bytes)),
             0x0806 => EtherPayload::Arp(arp::ArpPacket::parse(bytes)),
+            0x86DD => EtherPayload::Ipv6(ipv6::Ipv6Packet::parse(bytes)),
             _ => EtherPayload::Other(other::Other::parse(bytes)),
         }
     }
