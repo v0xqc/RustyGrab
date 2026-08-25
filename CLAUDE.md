@@ -37,21 +37,31 @@ Without it the build fails with `LNK1181: cannot open input file 'wpcap.lib'`. T
 
 ## Architecture
 
-Everything is in `src/main.rs` (~440 lines). The decode path is a tree of nested structs, each layer owning its parsed payload:
+The decode path is a tree of nested structs, each layer owning its parsed payload:
 
 ```
-Packet { count, data_length, ethernet }
-  └─ Ethernet { dest_mac, src_mac, ethertype, payload }
-       └─ EtherPayload::Ipv4 | Other            (dispatch on ethertype, 0x0800 = IPv4)
-            └─ Ipv4Packet { version, ihl, protocol, src_ip, dest_ip, transport }
-                 └─ Transport::Tcp | Udp | Other  (dispatch on IP protocol, 6 / 17)
+Packet { count, data_length, ethernet }                     model/packet.rs
+  └─ Ethernet { dest_mac, src_mac, ethertype, payload }     protocols/ethernet.rs
+       └─ EtherPayload            (dispatch on ethertype)
+            ├─ Ipv4  0x0800 → Ipv4Packet  { version, ihl, protocol, src_ip, dest_ip, transport }
+            ├─ Ipv6  0x86DD → Ipv6Packet  { version, payload_length, next_header, hop_limit, addrs, transport }
+            ├─ Arp   0x0806 → ArpPacket   { opcode, sender_mac/ip, target_mac/ip }
+            └─ Other        → raw bytes
+                 └─ Transport     (dispatch on IP protocol / next_header)
+                      ├─ Icmp    1  → IcmpPacket   { icmp_type, code, body: IcmpBody }
+                      ├─ Tcp     6  → TcpSegment   { src_port, dest_port, flags }
+                      ├─ Udp     17 → UdpDatagram  { src_port, dest_port, length }
+                      ├─ Icmpv6  58 → Icmpv6Packet { icmp_type, code, body: Icmpv6Body }
+                      └─ Other      → raw bytes
 ```
 
-Each layer has a `parse(bytes: &[u8]) -> Self` associated function that slices its own header and hands the remainder down. `Endian` is a small enum wrapping `from_le_bytes`/`from_be_bytes` for pcap file-header fields.
+`IcmpBody` is `Echo { identifier, sequence } | Other`. `Icmpv6Body` adds `Neighbor { target: [u8;16] }`. Note the ICMP type numbers differ between v4 and v6 (echo is 8/0 vs 128/129) — that's why they are separate modules; do not share the lookup tables.
+
+Each layer has a `parse(bytes: &[u8]) -> Self` associated function that slices its own header and hands the remainder down. IPv6 currently assumes no extension headers (transport starts at byte 40) — a deliberate simplification. `Endian` is a small enum wrapping `from_le_bytes`/`from_be_bytes` for pcap file-header fields.
 
 Two entry points feed the same `Packet::parse`:
-- `read_file` — walks the pcap file by hand: 24-byte global header, then 16-byte record headers with the captured length at offset 8.
-- `live_capture` — `pcap::Capture` loop; `TimeoutExpired` is skipped rather than treated as fatal.
+- `source/pcap_file.rs` — walks the pcap file by hand: 24-byte global header, magic-number validation, then 16-byte record headers with the captured length at offset 8. Guards against truncated records.
+- `source/live.rs` — `pcap::Capture` loop; `TimeoutExpired` is skipped rather than treated as fatal.
 
 ### Rules the author has adopted
 
@@ -63,11 +73,27 @@ Two entry points feed the same `Packet::parse`:
 
 ## Layout
 
-- `src/main.rs` — everything so far. Splitting into `protocols/` and `source/` modules is the next planned refactor.
-- `test_file/` — sample captures: `chargen-tcp.pcap`, `chargen-udp.pcap`, `ipv4frags.pcap`. Classic `.pcap` format only, **not** `.pcapng`. More at the Wireshark sample captures wiki.
+```
+src/main.rs              mod declarations + main(); delegates to cli
+src/cli.rs               arg parsing and command dispatch
+src/model/packet.rs      Packet struct + summary() (all output formatting lives here for now)
+src/model/other.rs       Other — raw undecoded bytes
+src/protocols/           ethernet, arp, ipv4, ipv6, transport, tcp, udp, icmp, icmpv6
+src/source/              pcap_file.rs, live.rs
+src/ui/, src/stats/, src/filter/, src/error.rs, src/protocols/app/dns.rs
+                         empty placeholders for planned work
+```
+
+`test_file/` holds public Wireshark sample captures only — **never commit the author's own traffic**. Classic `.pcap` format only, not `.pcapng`. More at the Wireshark sample captures wiki.
 
 ## Roadmap
 
-Done: pcap file parsing w/ endianness detection · Ethernet / IPv4 / TCP / UDP decode · CLI subcommands · live capture via Npcap.
+**Done:** pcap file parsing w/ endianness detection and input validation · Ethernet · ARP · IPv4 · IPv6 · TCP · UDP · ICMP · ICMPv6 · CLI subcommands · live capture via Npcap · module restructure.
 
-Next: module restructure · ARP / IPv6 / ICMP · display filters (`--proto`, `--port`) · `Result` in decoders · graceful Ctrl+C w/ summary · stats mode · ratatui TUI · egui three-pane GUI.
+**Known rough edges** (cosmetic, deliberately deferred — don't flag unprompted):
+- `Transport::Other` prints `:0` for ports that don't exist, and says `Other` rather than naming the protocol number.
+- `summary()` has two near-identical ICMP `if let` blocks and ~8 parallel `match transport` arms across the IPv4/IPv6 arms. A helper returning `(ports, label, detail)` would collapse them; the author has seen the duplication and is deciding when to act.
+- ICMPv6 neighbor discovery doesn't parse the link-layer address options after byte 24, so the MAC being resolved isn't shown.
+- Decoders `expect()`/panic on malformed or truncated frames.
+
+**Next, roughly by value:** display filters (`--proto`, `--port`) · `Result` + `?` in decoders (the biggest remaining Rust lesson) · graceful Ctrl+C w/ capture summary · stats mode · ratatui TUI · egui three-pane GUI. DNS (`protocols/app/dns.rs`) was deliberately skipped earlier and remains open.
