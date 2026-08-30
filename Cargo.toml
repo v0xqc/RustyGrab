@@ -5,4 +5,6 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
+crossterm = "0.29.0"
 pcap = "2.5.0"
+ratatui = "0.30.2"

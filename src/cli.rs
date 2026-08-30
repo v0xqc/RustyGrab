@@ -1,32 +1,12 @@
-use crate::source::{pcap_file, live};
+use crate::source::{live, pcap_file};
+use std::io::{self, Write};
+use crate::ui::tui;
 
-pub fn start_cli(args: Vec<String>) {
-    if args.len() < 2 {
-        eprintln!("Error: Command unknown or missing. Please provide a valid command.");
-        eprintln!("Usage: rustygrab <command> [<args>]");
-        eprintln!("Use 'rustygrab help' for more information.");
-        return;
+pub fn cli_app() {
+    if let Err(e) = tui::tui() {
+        let _ = crossterm::terminal::disable_raw_mode();
+        eprintln!("rustygrab: terminal error: {}", e);
     }
-
-    match args[1].as_str() {
-        "read" => match args.get(2) {
-            Some(file_path) => pcap_file::read_file(file_path),
-            None => {
-                eprintln!("Error: Missing file path for 'read' command.");
-                eprintln!("Usage: rustygrab read <file_path>");
-            }
-        },
-        "live" => match args.get(2) {
-            Some(inter_index) => {
-                live::live_capture(inter_index);
-            }
-            None => live::list_devices(),
-        },
-        "help" => help(),
-        "version" => version(),
-        _ => println!("Unknown command: {}", args[1]),
-    }
-
 }
 
 fn version() {
